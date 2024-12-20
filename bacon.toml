@@ -1,0 +1,6 @@
+default_job = "dev"
+
+[jobs.dev]
+command = ["cargo", "run"]
+watch = ["src/"]
+need_stdout = true
