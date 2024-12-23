@@ -12,13 +12,14 @@ use axum::{
 };
 use http_body_util::BodyExt;
 use serde::Deserialize;
-use tower_cookies::CookieManagerLayer;
+use tower_cookies::{CookieManagerLayer, Cookies};
 use tower_http::services::ServeDir; // HTML 응답을 보내기 위한 타입 
 use std::net::SocketAddr; // IP주소와 포트를 다루는 타입
 use tokio::net::TcpListener; // 비동기 TCP 서버 리스너 
 use tracing_subscriber;
 
 mod error;
+mod model;
 mod web;
 #[tokio::main] // 이 함수를 비동기 런타임에서 실행하도록 하는 매크로
 async fn main() {
@@ -30,6 +31,7 @@ async fn main() {
     let routes_all = Router::new()
         .merge(routes_hello())
         .merge(web::route_login::router())
+        .layer(middleware::from_fn(track_cookies))
         .layer(middleware::from_fn(print_request_response))
         .layer(CookieManagerLayer::new())
         .fallback_service(routes_static());
@@ -59,11 +61,6 @@ async fn print_request_response(req: Request, next: Next) -> Result<impl IntoRes
     for (key, value) in req.headers() {
         println!("{}:{:?}", key, value);
     }
-    println!();
-    println!("--> Request Cookies");
-    if let Some(cookie_header) = req.headers().get("Cookie") {
-        println!("--> - {cookie_header:?}");
-    }
 
 
     let (parts, body) = req.into_parts();
@@ -81,23 +78,6 @@ async fn print_request_response(req: Request, next: Next) -> Result<impl IntoRes
         println!("{}:{:?}", key, value);
     }
 
-    println!();
-    println!("--> Response Cookies");
-    for (key, value) in res.headers().iter() {
-        if key == "set-cookie" {
-            println!("--> - {value:?}");
-        }
-    }
-
-    println!();
-    println!("Other Headers");
-    for (key, value) in res.headers() {
-        if key != "set-cookie" {
-            println!("{}:{:?}", key, value);
-        }
-    }
-
-    println!("--------------------------------");
     let (parts, body) = res.into_parts();
     let bytes = buffer_and_print("response", body).await?;
     let res = Response::from_parts(parts, Body::from(bytes));
@@ -120,6 +100,24 @@ where
     }
 
     Ok(bytes)
+}
+
+async fn track_cookies(cookies: Cookies, req: Request, next: Next) -> Result<impl IntoResponse> {
+    println!("\n=== Cookie Tracking Start ===");
+
+    println!("--> Request Cookies");
+    for cookie in cookies.list() {
+        println!("===> Name: {}, Value: {}", cookie.name(), cookie.value());
+    }
+    let res = next.run(req).await;
+
+    println!("--> Response Cookies");
+    for cookie in cookies.list() {
+        println!("===> Name: {}, Value: {}, Path: {}", cookie.name(), cookie.value(), cookie.path().unwrap_or("/"));
+    }
+    println!("=== Cookie Tracking End ===");
+
+    Ok(res)
 }
 
 
